@@ -1,0 +1,1508 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 22,
+   "id": "33cb93d2-735f-4dfa-ae30-6ba878d28b87",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# This version is timesorted to compare cosine similarity"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 23,
+   "id": "f93a284e",
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [],
+   "source": [
+    "\n",
+    "import zipfile\n",
+    "import os\n",
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import scipy.stats as st\n",
+    "import matplotlib.pyplot as plt\n",
+    "import seaborn as sns\n",
+    "import requests\n",
+    "import xml.etree.ElementTree as ET\n",
+    "import tensorflow as t\n",
+    "import torch\n",
+    "import torch\n",
+    "from sentence_transformers import SentenceTransformer, util\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "ef981db0",
+   "metadata": {},
+   "source": [
+    "# Unzipping csv file"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 24,
+   "id": "d7c043fc",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "\n",
+    "uploaded_zip = '/home/claney/EclipsePlatform/eclipse_platform.zip'\n",
+    "extract_dir = '/home/claney/extracted'\n",
+    "if not os.path.exists(extract_dir):\n",
+    "    os.makedirs(extract_dir)\n",
+    "with zipfile.ZipFile(uploaded_zip, 'r') as zip_ref:\n",
+    "    zip_ref.extractall(extract_dir)\n",
+    "\n",
+    "csv_file = os.path.join(extract_dir, 'eclipse_platform.csv')\n",
+    "full_df = pd.read_csv(csv_file)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 25,
+   "id": "34e21509",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "full_df.fillna(0,inplace=True)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "83de5f3d",
+   "metadata": {},
+   "source": [
+    "# Spliting testing and training"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 26,
+   "id": "099a10a7",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "length=len(full_df)\n",
+    "split_index=int(.8*length)\n",
+    "df=full_df.iloc[:split_index] #df=training set\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "feff3889",
+   "metadata": {},
+   "source": [
+    "# Creating isDuplicate column"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 27,
+   "id": "d6ed45e5",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "0        0\n",
+      "1        0\n",
+      "2        0\n",
+      "3        0\n",
+      "4        0\n",
+      "        ..\n",
+      "68119    0\n",
+      "68120    0\n",
+      "68121    0\n",
+      "68122    0\n",
+      "68123    0\n",
+      "Name: isDuplicate, Length: 68124, dtype: int64\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/tmp/ipykernel_291979/1537637410.py:3: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame.\n",
+      "Try using .loc[row_indexer,col_indexer] = value instead\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  df['isDuplicate'] = df['Duplicated_issue'].apply(lambda x: is_duplicate(x))\n"
+     ]
+    }
+   ],
+   "source": [
+    "def is_duplicate(val):\n",
+    "    return 1 if val !=0.0 else 0\n",
+    "df['isDuplicate'] = df['Duplicated_issue'].apply(lambda x: is_duplicate(x))\n",
+    "\n",
+    "print(df['isDuplicate'])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 28,
+   "id": "3121314f",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "isDuplicate\n",
+      "0    56126\n",
+      "1    11998\n",
+      "Name: count, dtype: int64\n"
+     ]
+    },
+    {
+     "data": {
+      "image/png": "iVBORw0KGgoAAAANSUhEUgAAAoAAAAH2CAYAAADgXj1iAAAAOXRFWHRTb2Z0d2FyZQBNYXRwbG90bGliIHZlcnNpb24zLjcuMiwgaHR0cHM6Ly9tYXRwbG90bGliLm9yZy8pXeV/AAAACXBIWXMAAA9hAAAPYQGoP6dpAABT7UlEQVR4nO3dd5xcdb3/8ff0siXZni3ZTU8gjRog9C6ESLmgCEiIdFQIyE/QC1L0SgBRFAT0UqKiXNQrSMeIgHgNGBACIQHSk+2915k5vz+GXbLsbrL9zDnn9Xw8FrKzszOfnZkz5z3f6jIMwxAAAAAcw212AQAAABhfBEAAAACHIQACAAA4DAEQAADAYQiAAAAADkMABAAAcBgCIAAAgMMQAAEAAByGAAgAAOAwBEDs0apVq+RyuXq+vF6vCgoKtHz5cpWUlJhd3oht2LBBt956q7Zv3252KaPqlVde0UEHHaSkpCS5XC49/fTT/V5v+/btvZ5fn8+njIwMHXzwwbr22mv14Ycfjku93XWsWrWq57Lu195YPTd2fe4H8tprr/U8z2vWrOnz84suukjJyckmVBa3++vQ4/EoLS1NCxcu1OWXX64333xzXOu49dZbe77vftxee+21Mbm/0tJS3XrrrXrvvffG5PaBgRAAMSiPPfaY1qxZo9WrV+vSSy/VE088oSOPPFItLS1mlzYiGzZs0G233WarEGAYhr70pS/J5/PpmWee0Zo1a3T00Ufv8Xe++c1vas2aNXr99df1m9/8RmeccYaeeeYZLVy4UHffffc4Vd7bkiVLtGbNGuXm5o7J7dvxuR+sb3/722aX0K+zzz5ba9as0T/+8Q/9z//8jy688EK9+eabOuyww3TNNdeYUtMBBxygNWvW6IADDhiT2y8tLdVtt91GAMS485pdAKxh3rx5OuiggyRJxx57rKLRqL7//e/r6aef1vnnnz+i225tbVU4HB6NMqH4CaW2tlZnnnmmjj/++EH9TmFhoQ499NCe70899VRdd911Ouuss/Ttb39b8+bN0ymnnDJWJfcrKytLWVlZ43qfTvCFL3xBL730kp599lktXbrU7HJ6ycnJ6fU6PPnkk7VixQpddtll+tnPfqY5c+boyiuvHNeaUlNTe9UE2AUtgBiW7jfEHTt2SIq3Oj3wwAPab7/9FAqFlJaWprPPPltbt27t9XvHHHOM5s2bp7///e9avHixwuGwvva1r0mS6uvr9a1vfUvTpk1TIBBQdna2Tj31VH300Uc9v9/Z2akf/OAHmjNnjgKBgLKysrR8+XJVVVX1up8pU6botNNO00svvaQDDjhAoVBIc+bM0aOPPtpznVWrVumcc86RFA+13d1P3d2Qq1ev1umnn66CggIFg0HNmDFDl19+uaqrq/s8Hn/+85+1YMECBQIBTZs2TT/96U916623yuVy9breYB+ngfzjH//Q8ccfr5SUFIXDYS1evFjPP/98z89vvfVWFRQUSJJuuOEGuVwuTZkyZVC3/XmhUEiPPPKIfD5fr1bA/v4uqf8u2+7n4amnntKCBQsUDAY1bdo0/exnP9vr/Q/UBfzSSy/p+OOP14QJExQOh7XPPvvojjvu6Pn522+/rXPPPVdTpkxRKBTSlClT9JWvfKXntdp923t67iXpr3/9q44//nilpqYqHA7r8MMP1yuvvNKrlqqqKl122WWaPHlyz+vx8MMP11//+tcB/66nn35aLperz21J0oMPPiiXy6X3339fkrR161ade+65ysvLUyAQUE5Ojo4//vgRtRZddNFF2nffffWd73xH0Wh0j9eNxWK66667eo637OxsXXjhhSouLu51ve7jeu3atTryyCMVDoc1bdo0rVy5UrFYbNi1SpLH49H999+vzMzMXq/DgV4f/XXZdtf3xhtv6NBDD1UoFFJ+fr5uvvnmvT4GA3UBv/XWW1q6dKkyMjIUDAY1ffp0rVixoufnmzdv1vLlyzVz5kyFw2Hl5+dr6dKl+uCDD3rd9sEHHyxJWr58ec/rcPcu6Lfffltf/OIXlZ6ermAwqP3331+///3ve9XS2tqq66+/XlOnTlUwGFR6eroOOuggPfHEE3v82+BsBEAMy+bNmyWpp4Xm8ssv14oVK3TCCSfo6aef1gMPPKAPP/xQixcvVkVFRa/fLSsr0wUXXKDzzjtPL7zwgq666io1NTXpiCOO0C9+8QstX75czz77rB566CHNmjVLZWVlkuIno9NPP10rV67Ueeedp+eff14rV67U6tWrdcwxx6itra3X/axbt07f+ta3dO211/YEtIsvvlh///vfJcW7GH/4wx9Kkn7+859rzZo1WrNmjZYsWSJJ2rJliw477DA9+OCD+stf/qLvfe97euutt3TEEUeoq6ur535eeuklnXXWWcrIyNCTTz6pu+66S0888YR+9atf9XnchvI4fd7rr7+u4447Tg0NDXrkkUf0xBNPKCUlRUuXLtWTTz4pSbrkkkv0pz/9SdJn3bpPPfXUIJ7R/uXl5enAAw/UP//5T0UikWHdxnvvvacVK1bo2muv1VNPPaXFixfrmmuu0Y9+9KMh39YjjzyiU089VbFYTA899JCeffZZXX311b0Cyfbt2zV79mzde++9evnll3XnnXeqrKxMBx98cE9439tz//jjj+ukk05SamqqfvWrX+n3v/+90tPTdfLJJ/cKbl/96lf19NNP63vf+57+8pe/6OGHH9YJJ5ygmpqaAf+G0047TdnZ2Xrsscf6/GzVqlU64IADtGDBAknxlth33nlHd911l1avXq0HH3xQ+++/v+rr64f82HXzeDy644479OGHH/b7Gt3dlVdeqRtuuEEnnniinnnmGX3/+9/XSy+9pMWLF/f5IFReXq7zzz9fF1xwgZ555hmdcsop+s53vqPHH3982LV2C4VCOuGEE7Rt27Y+4XOwysvLde655+r888/Xn//8Z5199tn6wQ9+MKyu5ZdffllHHnmkdu7cqR//+Md68cUXddNNN/U6hktLS5WRkaGVK1fqpZde0s9//nN5vV4dcsgh+vjjjyXFu5e7Xwc33XRTz+vwkksukSS9+uqrOvzww1VfX6+HHnpIf/7zn7Xffvvpy1/+cq8PK9ddd50efPBBXX311XrppZf0m9/8Ruecc84eX4eADGAPHnvsMUOS8eabbxpdXV1GU1OT8dxzzxlZWVlGSkqKUV5ebqxZs8aQZNxzzz29fnfXrl1GKBQyvv3tb/dcdvTRRxuSjFdeeaXXdW+//XZDkrF69eoBa3niiScMScb//u//9rp87dq1hiTjgQce6LmsqKjICAaDxo4dO3oua2trM9LT043LL7+857I//OEPhiTj1Vdf3ePjEIvFjK6uLmPHjh2GJOPPf/5zz88OPvhgY/LkyUZHR0fPZU1NTUZGRoax+yE2lMepP4ceeqiRnZ1tNDU19VwWiUSMefPmGQUFBUYsFjMMwzC2bdtmSDLuvvvuPd7eYK/75S9/2ZBkVFRUGIZhGLfccovR31tH92tl27ZtPZcVFRUZLpfLeO+993pd98QTTzRSU1ONlpaWXnU89thjA95eU1OTkZqaahxxxBE9f+tgRCIRo7m52UhKSjJ++tOf9lw+0HPf0tJipKenG0uXLu11eTQaNRYuXGgsWrSo57Lk5GRjxYoVg66l23XXXWeEQiGjvr6+57INGzYYkoz77rvPMAzDqK6uNiQZ995775Bvvz+vvvqqIcn4wx/+YBiGYRxxxBFGQUGB0dbWZhiGYSxbtsxISkrquf7GjRsNScZVV13V63beeustQ5Lx3e9+t+ey7uP6rbfe6nXdfffd1zj55JMHVZ8k4+tf//qAP7/hhht63Ud/r7fd/87dn9fu+nY/bg3DMC699FLD7Xb3ep+QZNxyyy17vL3p06cb06dP73nsBiMSiRidnZ3GzJkzjWuvvbbn8u73r91f+93mzJlj7L///kZXV1evy0877TQjNzfXiEajhmEYxrx584wzzjhj0LUAhmEYtABiUA499FD5fD6lpKTotNNO06RJk/Tiiy8qJydHzz33nFwuly644AJFIpGer0mTJmnhwoV9uk7S0tJ03HHH9brsxRdf1KxZs3TCCScMWMNzzz2niRMnaunSpb3uZ7/99tOkSZP63M9+++2nwsLCnu+DwaBmzZrVqytwTyorK3XFFVdo8uTJ8nq98vl8KioqkiRt3LhRktTS0qK3335bZ5xxhvx+f8/vJicn9xlfNdTHaXctLS166623dPbZZ/eaqenxePTVr35VxcXFPa0Ko80wjBH9/ty5c7Vw4cJel5133nlqbGzUv//970Hfzj//+U81Njbqqquu6rcLultzc7NuuOEGzZgxQ16vV16vV8nJyWppael53vZ2P7W1tVq2bFmv5ykWi+kLX/iC1q5d2zP5adGiRVq1apV+8IMf6M033+zVMrwnX/va19TW1tbTcivFJ1oFAgGdd955kqT09HRNnz5dd999t3784x/r3XffHXF36u7uvPNOFRcX66c//Wm/P3/11VclxbuMd7do0SLts88+fbqwJ02apEWLFvW6bMGCBb2Ot2g02ucxHayRvg5TUlL0xS9+sddl5513nmKxWE+vwGB88skn2rJliy6++GIFg8EBrxeJRPTDH/5Q++67r/x+v7xer/x+vzZt2jSo1+HmzZv10Ucf9Yyx3v1xO/XUU1VWVtZzzC9atEgvvviibrzxRr322mt9ekOA/hAAMSi//vWvtXbtWr377rsqLS3V+++/r8MPP1ySVFFRIcMwlJOTI5/P1+vrzTff7NNV1N+szqqqqp6xawOpqKhQfX29/H5/n/spLy/vcz8ZGRl9biMQCAzqzTEWi+mkk07Sn/70J33729/WK6+8on/96189y1F030ZdXV3P3/55n79sqI/T7rrvp7/HLi8vT5LGrLtnx44dCgQCSk9PH9bvT5o0acDLhlJz9zjPvb1OzjvvPN1///265JJL9PLLL+tf//qX1q5dq6ysrEE9993deGeffXaf5+nOO++UYRiqra2VJD355JNatmyZHn74YR122GFKT0/XhRdeqPLy8j3ex9y5c3XwwQf3dP9Fo1E9/vjjOv3003se5+5xgieffLLuuusuHXDAAcrKytLVV1+tpqamvf4de7N48WKdccYZWrlyperq6vr8vPu5Geg19/nnbjDH2/Tp03s9nrfffvug6+0Okt2v96Hq7xgdy9fhddddp5tvvllnnHGGnn32Wb311ltau3atFi5cOKTX4fXXX9/ndXjVVVdJUs97xs9+9jPdcMMNevrpp3XssccqPT1dZ5xxhjZt2jTovwvOwyxgDMo+++zTMwv48zIzM+VyufTGG28oEAj0+fnnL+uv9SYrK2uvY3syMzOVkZGhl156qd+fp6Sk7PH3h2L9+vVat26dVq1apWXLlvVc3j32sVtaWppcLle/4/c+HwKG+jh9/n7cbnfPeMjdlZaW9tz+aCspKdE777yjo48+Wl5v/O2iu9Wjo6OjV80DBdj+wlD3Zf2FhoF0jzfd0+ukoaFBzz33nG655RbdeOONPZd3dHT0hLa96X4c77vvvgFnf3aHiczMTN1777269957tXPnTj3zzDO68cYbVVlZOeDrtNvy5ct11VVXaePGjdq6davKysq0fPnyXtcpKirSI488Iine8vT73/9et956qzo7O/XQQw8N6u/ZkzvuuEPz5s3rGQ+5u+7npqysrE/YKS0tHdbr7dlnn1VHR0fP94MNc21tbfrrX/+q6dOn99Sy++twdwO9Dvd0jI7261CKjyO98MIL+zy21dXVmjhx4l7vp/vx/c53vqOzzjqr3+vMnj1bkpSUlKTbbrtNt912myoqKnpaA5cuXdprEh2wO1oAMWKnnXaaDMNQSUmJDjrooD5f8+fP3+ttnHLKKfrkk0/0t7/9bY/3U1NTo2g02u/9dL8ZDkV3gPn8J/LukPr5UPaLX/yi1/dJSUk66KCD9PTTT6uzs7Pn8ubmZj333HN96h/u45SUlKRDDjlEf/rTn3rVGovF9Pjjj6ugoECzZs0awl++d21tbbrkkksUiUR6rRvXPau4e6Zqt2effbbf2/nwww+1bt26Xpf97ne/U0pKypDWVlu8eLEmTJighx56aMDuQJfLJcMw+jxvDz/8cJ/ZngM994cffrgmTpyoDRs29Ps8HXTQQb26+7sVFhbqG9/4hk488cRBdW1/5StfUTAY1KpVq7Rq1Srl5+frpJNOGvD6s2bN0k033aT58+cPqet8T+bMmaOvfe1ruu+++7Rz585eP+sepvH5SRxr167Vxo0bB73E0O7mz5/f63EcTACMRqP6xje+oZqaGt1www09lw/0OnzmmWf6vZ2mpqY+P/vd734nt9uto446atB/w6xZszR9+nQ9+uijfcLn7lwuV5/X4fPPP99nAf2BXoezZ8/WzJkztW7dugFfh/196M3JydFFF12kr3zlK/r444/V2to66L8NzkILIEbs8MMP12WXXably5fr7bff1lFHHaWkpCSVlZXpH//4h+bPn7/XtbtWrFihJ598UqeffrpuvPFGLVq0SG1tbXr99dd12mmn6dhjj9W5556r3/72tzr11FN1zTXXaNGiRfL5fCouLtarr76q008/XWeeeeaQap83b54k6Ze//KVSUlIUDAY1depUzZkzR9OnT9eNN94owzCUnp6uZ599VqtXr+5zG7fffruWLFmik08+Wddcc42i0ajuvvtuJScn92p1GunjdMcdd+jEE0/Uscceq+uvv15+v18PPPCA1q9fryeeeGKP4+L2ZufOnXrzzTcVi8XU0NCgd999V48++qh27Nihe+65p1cwOfXUU5Wenq6LL75Yt99+u7xer1atWqVdu3b1e9t5eXn64he/qFtvvVW5ubl6/PHHtXr1at15551DWv8xOTlZ99xzjy655BKdcMIJuvTSS5WTk6PNmzdr3bp1uv/++5WamqqjjjpKd999tzIzMzVlyhS9/vrreuSRR/q0ugz03GdkZOi+++7TsmXLVFtbq7PPPlvZ2dmqqqrSunXrVFVVpQcffFANDQ069thjdd5552nOnDlKSUnR2rVre2aF783EiRN15plnatWqVaqvr9f1118vt/uzz+Tvv/++vvGNb+icc87RzJkz5ff79be//U3vv/9+r9bNiy++WL/61a+0ZcuWnjGq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",
+      "text/plain": [
+       "<Figure size 800x600 with 1 Axes>"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    }
+   ],
+   "source": [
+    "import matplotlib.pyplot as plt\n",
+    "\n",
+    "# Assuming 'df' is your DataFrame and 'isDuplicate' is the column indicating duplicates\n",
+    "duplicate_counts = df['isDuplicate'].value_counts()\n",
+    "\n",
+    "# Check the contents of duplicate_counts\n",
+    "print(duplicate_counts)\n",
+    "\n",
+    "# Create a list of labels matching the length of duplicate_counts\n",
+    "# Ensure the labels match the values in the 'isDuplicate' column\n",
+    "labels = duplicate_counts.index.tolist()\n",
+    "\n",
+    "# Define colors (length should match number of unique values in 'isDuplicate')\n",
+    "colors = ['#FFB6C1', '#D8BFD8'][:len(labels)]\n",
+    "\n",
+    "# Plotting the pie chart\n",
+    "plt.figure(figsize=(8, 6))\n",
+    "plt.pie(duplicate_counts, labels=labels, autopct='%1.1f%%', startangle=140, colors=colors)\n",
+    "plt.title('Percentage of Duplicates vs. Non-Duplicates')\n",
+    "plt.axis('equal')\n",
+    "plt.show()\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "ecb58971-03bf-4973-9c3d-888660521a17",
+   "metadata": {},
+   "source": [
+    "# Preprocessing"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 29,
+   "id": "809e2c8b-63f1-4f0a-b7de-c40aa25294be",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/tmp/ipykernel_291979/77102330.py:1: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame.\n",
+      "Try using .loc[row_indexer,col_indexer] = value instead\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  df['Description'] = df['Description'].astype(str).fillna('')\n"
+     ]
+    }
+   ],
+   "source": [
+    "df['Description'] = df['Description'].astype(str).fillna('')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 30,
+   "id": "13a586d1",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "0        - Setup a project that contains a *.gif resour...\n",
+      "1        Opening repository resource always open the de...\n",
+      "2        KM (10/2/2001 5:55:18 PM); \\tThis PR about the...\n",
+      "3        - become synchronized with some project in a r...\n",
+      "4        For getting/setting the managed state of a res...\n",
+      "                               ...                        \n",
+      "68119    Build ID: 3.3 (I am not sure what You mean by ...\n",
+      "68120    There are several NPEs within the UI session t...\n",
+      "68121    I20080501-0100; ; Now that were using the coll...\n",
+      "68122    Created attachment 98318; screenshot; ; I20080...\n",
+      "68123    Build ID: M20080221-1800; ; Steps To Reproduce...\n",
+      "Name: full_text_data, Length: 68124, dtype: object\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/tmp/ipykernel_291979/3345744263.py:2: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame.\n",
+      "Try using .loc[row_indexer,col_indexer] = value instead\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  df['full_text_data']=df['Description']+df['Title']\n",
+      "/tmp/ipykernel_291979/3345744263.py:4: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame.\n",
+      "Try using .loc[row_indexer,col_indexer] = value instead\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  df['full_text_data']=df['full_text_data'].fillna('')\n"
+     ]
+    }
+   ],
+   "source": [
+    "#creating freeform textual data column\n",
+    "df['full_text_data']=df['Description']+df['Title']\n",
+    "print(df['full_text_data'])\n",
+    "df['full_text_data']=df['full_text_data'].fillna('')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "4307e49d",
+   "metadata": {},
+   "source": [
+    "# Sorting by time"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 31,
+   "id": "11181186",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "0        2001-10-10 21:34:00 -0400\n",
+      "1        2001-10-10 21:34:00 -0400\n",
+      "2        2001-10-10 21:34:00 -0400\n",
+      "3        2001-10-10 21:34:00 -0400\n",
+      "4        2001-10-10 21:34:00 -0400\n",
+      "                   ...            \n",
+      "68119    2008-05-01 09:47:00 -0400\n",
+      "68120    2008-05-01 09:52:00 -0400\n",
+      "68121    2008-05-01 10:05:00 -0400\n",
+      "68122    2008-05-01 11:02:00 -0400\n",
+      "68123    2008-05-01 11:20:00 -0400\n",
+      "Name: Created_time, Length: 68124, dtype: object\n"
+     ]
+    }
+   ],
+   "source": [
+    "print(df['Created_time'])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 32,
+   "id": "2f7b3c66",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/tmp/ipykernel_291979/497475349.py:3: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame.\n",
+      "Try using .loc[row_indexer,col_indexer] = value instead\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  df['Created_time'] = pd.to_datetime(df['Created_time'], utc=True)\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Convert the 'Created_time' column to datetime\n",
+    "# Convert the 'Created_time' column to datetime with UTC\n",
+    "df['Created_time'] = pd.to_datetime(df['Created_time'], utc=True)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 33,
+   "id": "6e21f12e",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "      Issue_id Priority Component  Duplicated_issue  \\\n",
+      "0            1       P3      Team               0.0   \n",
+      "1            2       P5      Team               0.0   \n",
+      "2            3       P5      Team               0.0   \n",
+      "3            4       P5      Team               0.0   \n",
+      "4            5       P3      Team               0.0   \n",
+      "...        ...      ...       ...               ...   \n",
+      "3218      7202       P3     Debug               0.0   \n",
+      "3219      7204       P3     Debug               0.0   \n",
+      "3220      7205       P5      Team               0.0   \n",
+      "3221      7207       P1     Debug               0.0   \n",
+      "3222      7208       P1     Debug               0.0   \n",
+      "\n",
+      "                                                  Title  \\\n",
+      "0       Usability issue with external editors (1GE6IRL)   \n",
+      "1     Opening repository resources doesnt honor type...   \n",
+      "2             Sync does not indicate deletion (1GIEN83)   \n",
+      "3     need better error message if catching up over ...   \n",
+      "4     ISharingManager sharing API inconsistent (1GAU...   \n",
+      "...                                                 ...   \n",
+      "3218  Detail area does not respect primitive type di...   \n",
+      "3219                   Copy variables action needs icon   \n",
+      "3220  Existing CVS repositories impossible to use wh...   \n",
+      "3221                          Launch configuration bugs   \n",
+      "3222               Variables tree collapsed on stepping   \n",
+      "\n",
+      "                                            Description    Status  Resolution  \\\n",
+      "0     - Setup a project that contains a *.gif resour...    CLOSED       FIXED   \n",
+      "1     Opening repository resource always open the de...  RESOLVED       FIXED   \n",
+      "2     KM (10/2/2001 5:55:18 PM); \\tThis PR about the...  RESOLVED       FIXED   \n",
+      "3     - become synchronized with some project in a r...  RESOLVED       FIXED   \n",
+      "4     For getting/setting the managed state of a res...  RESOLVED     WONTFIX   \n",
+      "...                                                 ...       ...         ...   \n",
+      "3218  The detail area of both the expression view an...  VERIFIED       FIXED   \n",
+      "3219  It can use the same icon as for the copy stack...  VERIFIED       FIXED   \n",
+      "3220  When an existing CVS repository has a source d...  RESOLVED       FIXED   \n",
+      "3221  The initial message in the launch config dialo...  VERIFIED       FIXED   \n",
+      "3222  If you have an object variable expanded in the...  RESOLVED  WORKSFORME   \n",
+      "\n",
+      "     Version              Created_time              Resolved_time  \\\n",
+      "0        2.0 2001-10-11 01:34:00+00:00  2012-02-09 15:57:47 -0500   \n",
+      "1        2.0 2001-10-11 01:34:00+00:00  2002-05-07 10:33:56 -0400   \n",
+      "2        2.0 2001-10-11 01:34:00+00:00  2010-05-07 10:28:53 -0400   \n",
+      "3        2.0 2001-10-11 01:34:00+00:00  2002-03-01 16:27:31 -0500   \n",
+      "4        2.0 2001-10-11 01:34:00+00:00  2008-08-15 08:04:36 -0400   \n",
+      "...      ...                       ...                        ...   \n",
+      "3218     2.0 2001-12-31 00:49:00+00:00  2002-08-12 15:57:54 -0400   \n",
+      "3219     2.0 2001-12-31 00:52:00+00:00  2001-12-31 11:08:40 -0500   \n",
+      "3220     2.0 2001-12-31 15:39:00+00:00  2002-05-23 21:20:29 -0400   \n",
+      "3221     2.0 2001-12-31 18:10:00+00:00  2002-03-05 10:39:01 -0500   \n",
+      "3222     2.0 2001-12-31 18:43:00+00:00  2002-01-02 13:44:31 -0500   \n",
+      "\n",
+      "      isDuplicate                                     full_text_data  Period  \n",
+      "0               0  - Setup a project that contains a *.gif resour...  2001Q4  \n",
+      "1               0  Opening repository resource always open the de...  2001Q4  \n",
+      "2               0  KM (10/2/2001 5:55:18 PM); \\tThis PR about the...  2001Q4  \n",
+      "3               0  - become synchronized with some project in a r...  2001Q4  \n",
+      "4               0  For getting/setting the managed state of a res...  2001Q4  \n",
+      "...           ...                                                ...     ...  \n",
+      "3218            0  The detail area of both the expression view an...  2001Q4  \n",
+      "3219            0  It can use the same icon as for the copy stack...  2001Q4  \n",
+      "3220            0  When an existing CVS repository has a source d...  2001Q4  \n",
+      "3221            0  The initial message in the launch config dialo...  2001Q4  \n",
+      "3222            0  If you have an object variable expanded in the...  2001Q4  \n",
+      "\n",
+      "[3223 rows x 14 columns]\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/tmp/ipykernel_291979/4009835520.py:8: UserWarning: Converting to PeriodArray/Index representation will drop timezone information.\n",
+      "  df['Period'] = df['Created_time'].dt.to_period('Q')\n",
+      "/tmp/ipykernel_291979/4009835520.py:8: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame.\n",
+      "Try using .loc[row_indexer,col_indexer] = value instead\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  df['Period'] = df['Created_time'].dt.to_period('Q')\n"
+     ]
+    }
+   ],
+   "source": [
+    "import pandas as pd\n",
+    "\n",
+    "# Assuming df is your original DataFrame with 'Created_time' column already converted to datetime\n",
+    "\n",
+    "\n",
+    "\n",
+    "# Create a 'Period' column to represent quarters\n",
+    "df['Period'] = df['Created_time'].dt.to_period('Q') \n",
+    "\n",
+    "# Group by quarters\n",
+    "period_groups = df.groupby('Period')\n",
+    "\n",
+    "# List to store DataFrames for each quarter\n",
+    "quarterly_dfs = []\n",
+    "count=0\n",
+    "# Iterate over groups and append DataFrames to list\n",
+    "for i, (period, group_df) in enumerate(period_groups):\n",
+    "    quarterly_dfs.append(group_df)\n",
+    "    count=count+1\n",
+    "\n",
+    "# Accessing each quarter's DataFrame:\n",
+    "# For example, to access the DataFrame for the first quarter:\n",
+    "print(quarterly_dfs[0])  # Index 0 corresponds to the first quarter DataFrame\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "c7dceeba-8501-4dfe-9c40-ae61aeaea1e0",
+   "metadata": {},
+   "source": [
+    "# Refactoring"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "d8e40cdc-b75e-4b4b-8a0e-dcd7e939b011",
+   "metadata": {},
+   "source": [
+    "### Creating functions to test with different parameters"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 34,
+   "id": "00e0f612-e2bf-4027-a42e-ec35d990304c",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def getDuplicateBugIDS(threshold_value,time_x_df): \n",
+    "    import torch\n",
+    "    model = SentenceTransformer('paraphrase-MiniLM-L6-v2')\n",
+    "    # Encode sentences and store the embeddings in the DataFrame\n",
+    "    time_x_df['embeddings'] = time_x_df['full_text_data'].apply(lambda x: model.encode(x, convert_to_tensor=True))\n",
+    "    # Convert embeddings to a tensor\n",
+    "    embeddings = torch.stack(time_x_df['embeddings'].tolist())\n",
+    "    # Calculate cosine similarity\n",
+    "    cosine_scores = util.pytorch_cos_sim(embeddings, embeddings)\n",
+    "    numpy_array = cosine_scores.numpy()\n",
+    "    # Reshape the NumPy array into a matrix\n",
+    "    similarity_Matrix= numpy_array.reshape(cosine_scores.shape)\n",
+    "    similarity_Matrix= np.round(similarity_Matrix, decimals=4)\n",
+    "    # Function to filter rows based on condition\n",
+    "    def filter_matrix(matrix, threshold):\n",
+    "        filtered_matrix = []\n",
+    "        for row in matrix:\n",
+    "            if np.any((row > threshold) & (row < 1)): #<1 to igorne the sim. with itself \n",
+    "                filtered_matrix.append(row)\n",
+    "        return np.array(filtered_matrix)\n",
+    "    # Filtering the matrix\n",
+    "    filtered_matrix = filter_matrix(similarity_Matrix, threshold_value)\n",
+    "    n = 0 #to iterate through\n",
+    "    time_x_df['Experimental_Duplicate_ID'] = np.nan  #intailly sets everything to null\n",
+    "    while n < filtered_matrix.shape[0]:  # number of rows do this process to each row \n",
+    "        matrix = filtered_matrix[n]\n",
+    "        def find_position(matrix):  # finds position (index) of bug all other bugs are comparing to\n",
+    "            result = np.where(matrix == 1.0)\n",
+    "            return result[0][0]  # Extract the first index directly\n",
+    "    \n",
+    "        def get_duplicate_ids_index(matrix):  # finds index where there are most similar bugs to the bug at find_position\n",
+    "            condition = np.logical_and(matrix > threshold_value, matrix < 1)\n",
+    "            indices = np.argwhere(condition)\n",
+    "            return indices\n",
+    "        def get_duplicate_ids(matrix_indexs_of_duplicates):\n",
+    "            duplicate_ids = \"\"\n",
+    "            for row in matrix_indexs_of_duplicates:\n",
+    "                for element in row:\n",
+    "                    specific_row = time_x_df.iloc[element]\n",
+    "                    duplicate_ids = duplicate_ids + \" \" + str(specific_row['Issue_id'])\n",
+    "            return duplicate_ids\n",
+    "        index_in_df = find_position(matrix)  # index of selected bug\n",
+    "        specific_row = time_x_df.iloc[index_in_df]  # selects bug row in dataframe\n",
+    "        duplicateIDs_index_in_df = get_duplicate_ids_index(matrix)  # index of duplicate bugs\n",
+    "        time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n",
+    "        n += 1  # to go through each row in the matrix\n",
+    "    return time_x_df['Experimental_Duplicate_ID']"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 35,
+   "id": "aa7dd017-6c6b-4972-9f74-6fd172583291",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def accuracy(time_x_df):\n",
+    "    #a match is considered if there are any matching values in exp_ids and dup_ids \n",
+    "       # Split the IDs by spaces and strip whitespace\n",
+    "    time_x_df.fillna(0,inplace=True) #fills with zeros for new column \n",
+    "    exp_ids = time_x_df['Experimental_Duplicate_ID'].astype(str).str.split().apply(lambda x: [i.strip() for i in x])\n",
+    "    dup_ids = time_x_df['Duplicated_issue'].astype(str).str.split().apply(lambda x: [i.strip() for i in x])\n",
+    "    \n",
+    "    # Convert all elements to strings to ensure consistent comparison\n",
+    "    exp_ids = exp_ids.apply(lambda x: [float(i) for i in x])\n",
+    "    dup_ids = dup_ids.apply(lambda x: [float(i) for i in x])\n",
+    "    # Check for any matches for each row\n",
+    "    matches = exp_ids.combine(dup_ids, lambda exp_list, dup_list: any(dup_id in exp_list for dup_id in dup_list))\n",
+    "    \n",
+    "    # Count the number of matches\n",
+    "    num_matches = matches.sum()\n",
+    "    accuracy=num_matches/len(time_x_df)\n",
+    "    return accuracy"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 36,
+   "id": "e2a22c9c-105d-4e9a-a78b-c164cebbd531",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def precision(time_x_df):\n",
+    "    time_x_df.fillna(0,inplace=True) #fills with zeros for new column \n",
+    "    exp_ids = time_x_df['Experimental_Duplicate_ID'].astype(str).str.split().apply(lambda x: [i.strip() for i in x])\n",
+    "    dup_ids = time_x_df['Duplicated_issue'].astype(str).str.split().apply(lambda x: [i.strip() for i in x])\n",
+    "    \n",
+    "    # Convert all elements to strings to ensure consistent comparison\n",
+    "    exp_ids = exp_ids.apply(lambda x: [float(i) for i in x])\n",
+    "    dup_ids = dup_ids.apply(lambda x: [float(i) for i in x])\n",
+    "    # Check for any matches for each row\n",
+    "    matches = exp_ids.combine(dup_ids, lambda exp_list, dup_list: any(dup_id in exp_list for dup_id in dup_list))\n",
+    "    \n",
+    "    # Count the number of matches which is when the experiment and actual match aka true positive\n",
+    "    truePositive = matches.sum()\n",
+    "    #falsePositive is when the experimental duplicate id has a number but the actual one doesn't\n",
+    "    falsePositives = ((time_x_df['Duplicated_issue'] == 0) & (time_x_df['Experimental_Duplicate_ID'] != 0)).sum()\n",
+    "    precison= truePositive/(truePositive+falsePositives)\n",
+    "    return precison\n",
+    "    "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 37,
+   "id": "d5d100d9-8ced-4f92-b55c-a9d7cbcbe758",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def recall(time_x_df):\n",
+    "    time_x_df.fillna(0,inplace=True) #fills with zeros for new column \n",
+    "    exp_ids = time_x_df['Experimental_Duplicate_ID'].astype(str).str.split().apply(lambda x: [i.strip() for i in x])\n",
+    "    dup_ids = time_x_df['Duplicated_issue'].astype(str).str.split().apply(lambda x: [i.strip() for i in x])\n",
+    "    \n",
+    "    # Convert all elements to strings to ensure consistent comparison\n",
+    "    exp_ids = exp_ids.apply(lambda x: [float(i) for i in x])\n",
+    "    dup_ids = dup_ids.apply(lambda x: [float(i) for i in x])\n",
+    "    # Check for any matches for each row\n",
+    "    matches = exp_ids.combine(dup_ids, lambda exp_list, dup_list: any(dup_id in exp_list for dup_id in dup_list))\n",
+    "    \n",
+    "    # Count the number of matches which is when the experiment and actual match aka true positive\n",
+    "    truePositive = matches.sum()\n",
+    "\n",
+    "    # Convert columns to sets\n",
+    "    experimental_set = set(time_x_df['Experimental_Duplicate_ID'])\n",
+    "    actual_set = set(time_x_df['Duplicated_issue'])\n",
+    "\n",
+    "    # Identify False Negatives\n",
+    "    falseNegatives = actual_set - experimental_set\n",
+    "    falseNegativesCount=len(list(falseNegatives))\n",
+    "    recall=truePositive/(truePositive+falseNegativesCount)\n",
+    "    return recall"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 38,
+   "id": "acaa2620-383b-4c2c-9335-bbd3d1d6187e",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def f1(time_x_df):\n",
+    "    recallVal=recall(time_x_df)\n",
+    "    precisonVal=precision(time_x_df)\n",
+    "    f1=2*((recallVal*precisonVal)/(precisonVal+recallVal))\n",
+    "    return f1"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 39,
+   "id": "b7e4c242-2af3-4540-a12f-1947ec278264",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def experimentalisDuplicate(time_x_df): #creates column for experimental binary isDuplciates\n",
+    "    def is_duplicate(val):\n",
+    "        return 1 if val !=(0.0 or 0) else 0\n",
+    "    time_x_df['isExperimentalDuplicate'] = time_x_df['Experimental_Duplicate_ID'].apply(lambda x: is_duplicate(x))\n",
+    "    return time_x_df['isExperimentalDuplicate']"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 40,
+   "id": "7bfb1ee5-f807-402b-8b86-aa8ba7e92f4e",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def binaryAccuracy(time_x_df): #see if the ones and zeros match, different from other acuracy becuase that one can have only one element mathc and it count ex bug 1 has ids 1234 and 8472 it should still count as a duplciate to bug 2 with 1234 0889 \n",
+    "    matches=time_x_df['isExperimentalDuplicate']==time_x_df['isDuplicate']\n",
+    "    num_matches=matches.sum()\n",
+    "    accuracy=num_matches/len(time_x_df['isExperimentalDuplicate'])\n",
+    "    return accuracy"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "122da3eb-c8a3-4551-9752-e74449cdefe2",
+   "metadata": {},
+   "source": [
+    "# MORE refactoring"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 44,
+   "id": "8fe363a3",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 0 for matching id is %90.32\n",
+      "Accuracy for topic 0 for duplicate or not is %90.32\n",
+      "Recall for topic 0 is %92.38\n",
+      "Precision for topic 0 is %99.52\n",
+      "F1 score for topic 0 is %95.82\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 1 for matching id is %88.01\n",
+      "Accuracy for topic 1 for duplicate or not is %88.01\n",
+      "Recall for topic 1 is %89.66\n",
+      "Precision for topic 1 is %100.00\n",
+      "F1 score for topic 1 is %94.55\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 2 for matching id is %83.06\n",
+      "Accuracy for topic 2 for duplicate or not is %83.06\n",
+      "Recall for topic 2 is %86.61\n",
+      "Precision for topic 2 is %100.00\n",
+      "F1 score for topic 2 is %92.83\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 3 for matching id is %84.44\n",
+      "Accuracy for topic 3 for duplicate or not is %84.44\n",
+      "Recall for topic 3 is %86.51\n",
+      "Precision for topic 3 is %100.00\n",
+      "F1 score for topic 3 is %92.77\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 4 for matching id is %80.74\n",
+      "Accuracy for topic 4 for duplicate or not is %80.74\n",
+      "Recall for topic 4 is %83.55\n",
+      "Precision for topic 4 is %100.00\n",
+      "F1 score for topic 4 is %91.04\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 5 for matching id is %80.28\n",
+      "Accuracy for topic 5 for duplicate or not is %80.28\n",
+      "Recall for topic 5 is %84.43\n",
+      "Precision for topic 5 is %100.00\n",
+      "F1 score for topic 5 is %91.56\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 6 for matching id is %78.62\n",
+      "Accuracy for topic 6 for duplicate or not is %78.62\n",
+      "Recall for topic 6 is %82.24\n",
+      "Precision for topic 6 is %100.00\n",
+      "F1 score for topic 6 is %90.26\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 7 for matching id is %80.29\n",
+      "Accuracy for topic 7 for duplicate or not is %80.29\n",
+      "Recall for topic 7 is %83.94\n",
+      "Precision for topic 7 is %100.00\n",
+      "F1 score for topic 7 is %91.27\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 8 for matching id is %77.59\n",
+      "Accuracy for topic 8 for duplicate or not is %77.59\n",
+      "Recall for topic 8 is %82.44\n",
+      "Precision for topic 8 is %100.00\n",
+      "F1 score for topic 8 is %90.37\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 9 for matching id is %77.58\n",
+      "Accuracy for topic 9 for duplicate or not is %77.58\n",
+      "Recall for topic 9 is %82.61\n",
+      "Precision for topic 9 is %100.00\n",
+      "F1 score for topic 9 is %90.48\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 10 for matching id is %78.14\n",
+      "Accuracy for topic 10 for duplicate or not is %78.14\n",
+      "Recall for topic 10 is %83.14\n",
+      "Precision for topic 10 is %100.00\n",
+      "F1 score for topic 10 is %90.80\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 11 for matching id is %80.67\n",
+      "Accuracy for topic 11 for duplicate or not is %80.67\n",
+      "Recall for topic 11 is %83.38\n",
+      "Precision for topic 11 is %100.00\n",
+      "F1 score for topic 11 is %90.93\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 12 for matching id is %81.86\n",
+      "Accuracy for topic 12 for duplicate or not is %81.86\n",
+      "Recall for topic 12 is %84.29\n",
+      "Precision for topic 12 is %100.00\n",
+      "F1 score for topic 12 is %91.48\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 13 for matching id is %83.99\n",
+      "Accuracy for topic 13 for duplicate or not is %83.99\n",
+      "Recall for topic 13 is %86.38\n",
+      "Precision for topic 13 is %100.00\n",
+      "F1 score for topic 13 is %92.69\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 14 for matching id is %83.64\n",
+      "Accuracy for topic 14 for duplicate or not is %83.64\n",
+      "Recall for topic 14 is %86.49\n",
+      "Precision for topic 14 is %100.00\n",
+      "F1 score for topic 14 is %92.75\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 15 for matching id is %80.92\n",
+      "Accuracy for topic 15 for duplicate or not is %80.92\n",
+      "Recall for topic 15 is %82.94\n",
+      "Precision for topic 15 is %100.00\n",
+      "F1 score for topic 15 is %90.68\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 16 for matching id is %83.73\n",
+      "Accuracy for topic 16 for duplicate or not is %83.73\n",
+      "Recall for topic 16 is %85.65\n",
+      "Precision for topic 16 is %100.00\n",
+      "F1 score for topic 16 is %92.27\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 17 for matching id is %84.35\n",
+      "Accuracy for topic 17 for duplicate or not is %84.35\n",
+      "Recall for topic 17 is %86.47\n",
+      "Precision for topic 17 is %100.00\n",
+      "F1 score for topic 17 is %92.75\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 18 for matching id is %81.21\n",
+      "Accuracy for topic 18 for duplicate or not is %81.21\n",
+      "Recall for topic 18 is %84.98\n",
+      "Precision for topic 18 is %100.00\n",
+      "F1 score for topic 18 is %91.88\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 19 for matching id is %78.90\n",
+      "Accuracy for topic 19 for duplicate or not is %78.90\n",
+      "Recall for topic 19 is %82.13\n",
+      "Precision for topic 19 is %100.00\n",
+      "F1 score for topic 19 is %90.19\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 20 for matching id is %83.23\n",
+      "Accuracy for topic 20 for duplicate or not is %83.23\n",
+      "Recall for topic 20 is %86.40\n",
+      "Precision for topic 20 is %100.00\n",
+      "F1 score for topic 20 is %92.70\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 21 for matching id is %85.29\n",
+      "Accuracy for topic 21 for duplicate or not is %85.29\n",
+      "Recall for topic 21 is %87.10\n",
+      "Precision for topic 21 is %100.00\n",
+      "F1 score for topic 21 is %93.11\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 22 for matching id is %86.00\n",
+      "Accuracy for topic 22 for duplicate or not is %86.00\n",
+      "Recall for topic 22 is %87.49\n",
+      "Precision for topic 22 is %100.00\n",
+      "F1 score for topic 22 is %93.33\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 23 for matching id is %82.48\n",
+      "Accuracy for topic 23 for duplicate or not is %82.48\n",
+      "Recall for topic 23 is %85.22\n",
+      "Precision for topic 23 is %100.00\n",
+      "F1 score for topic 23 is %92.02\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 24 for matching id is %85.19\n",
+      "Accuracy for topic 24 for duplicate or not is %85.19\n",
+      "Recall for topic 24 is %87.76\n",
+      "Precision for topic 24 is %100.00\n",
+      "F1 score for topic 24 is %93.48\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n",
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 25 for matching id is %85.74\n",
+      "Accuracy for topic 25 for duplicate or not is %85.74\n",
+      "Recall for topic 25 is %87.78\n",
+      "Precision for topic 25 is %100.00\n",
+      "F1 score for topic 25 is %93.49\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/home/claney/anaconda3/lib/python3.11/site-packages/huggingface_hub/file_download.py:1132: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.\n",
+      "  warnings.warn(\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Accuracy for topic 26 for matching id is %85.20\n",
+      "Accuracy for topic 26 for duplicate or not is %85.20\n",
+      "Recall for topic 26 is %86.29\n",
+      "Precision for topic 26 is %100.00\n",
+      "F1 score for topic 26 is %92.64\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/tmp/ipykernel_291979/474897665.py:45: SettingWithCopyWarning: \n",
+      "A value is trying to be set on a copy of a slice from a DataFrame\n",
+      "\n",
+      "See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy\n",
+      "  time_x_df['Experimental_Duplicate_ID'][index_in_df]=get_duplicate_ids(duplicateIDs_index_in_df)\n"
+     ]
+    }
+   ],
+   "source": [
+    "\n",
+    "# Initialize lists to store the results\n",
+    "#for 85% similarity b\n",
+    "accuracy_values = []\n",
+    "binary_accuracy_values = []\n",
+    "recall_values = []\n",
+    "precision_values = []\n",
+    "f1_values = []\n",
+    "time_dfs=quarterly_dfs\n",
+    "for x in range(count): #counts is from when the dataframe was split into time \n",
+    "    df = time_dfs[x]\n",
+    "\n",
+    "    df['Experimental_Duplicate_ID'] = getDuplicateBugIDS(0.95, df)\n",
+    "    accuracyVal = accuracy(df) * 100\n",
+    "    accuracy_values.append(accuracyVal)\n",
+    "    print(f\"Accuracy for topic {x} for matching id is %{accuracyVal:.2f}\")\n",
+    "\n",
+    "    experimentalisDuplicate(df)\n",
+    "    binaryAccuracyVal = binaryAccuracy(df) * 100\n",
+    "    binary_accuracy_values.append(binaryAccuracyVal)\n",
+    "    print(f\"Accuracy for topic {x} for duplicate or not is %{binaryAccuracyVal:.2f}\")\n",
+    "\n",
+    "    recallVal = recall(df) * 100\n",
+    "    recall_values.append(recallVal)\n",
+    "    print(f\"Recall for topic {x} is %{recallVal:.2f}\")\n",
+    "\n",
+    "    precisionVal = precision(df) * 100\n",
+    "    precision_values.append(precisionVal)\n",
+    "    print(f\"Precision for topic {x} is %{precisionVal:.2f}\")\n",
+    "\n",
+    "    f1Val = f1(df) * 100\n",
+    "    f1_values.append(f1Val)\n",
+    "    print(f\"F1 score for topic {x} is %{f1Val:.2f}\")\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "5acaf010",
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "id": "0c094bd5",
+   "metadata": {},
+   "source": [
+    "# Averages"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 45,
+   "id": "1f583a5e",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "82.64709680189063\n",
+      "82.64709680189063\n",
+      "85.49167079176021\n",
+      "99.98227287116175\n",
+      "92.15260406985833\n"
+     ]
+    }
+   ],
+   "source": [
+    "import statistics\n",
+    "print(statistics.mean(accuracy_values))\n",
+    "print(statistics.mean(binary_accuracy_values))\n",
+    "print(statistics.mean(recall_values))\n",
+    "print(statistics.mean(precision_values))\n",
+    "print(statistics.mean(f1_values))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "f21c2245-e24c-4375-b187-38cb5005aa7c",
+   "metadata": {},
+   "source": [
+    " # Visualizations"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 43,
+   "id": "8a124d1d-479a-4101-adbc-ac1847ba7857",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "image/png": "iVBORw0KGgoAAAANSUhEUgAABW0AAAMWCAYAAACKoqSLAAAAOXRFWHRTb2Z0d2FyZQBNYXRwbG90bGliIHZlcnNpb24zLjcuMiwgaHR0cHM6Ly9tYXRwbG90bGliLm9yZy8pXeV/AAAACXBIWXMAAA9hAAAPYQGoP6dpAAB7y0lEQVR4nOzdeZiWZcE+4GvYhh0UlQFDcUFRATVBy51wF1PJFJcSUbMP9yXUzMRScCklJTU3IJUsP5dP+XJBcNcSF9TM9MsNFwhzY1FZ398f/pgcYRDGgXlgzvM43iPe+9mu951H87i4537KSqVSKQAAAAAAFEKDug4AAAAAAMB/KG0BAAAAAApEaQsAAAAAUCBKWwAAAACAAlHaAgAAAAAUiNIWAAAAAKBAlLYAAAAAAAWitAUAAAAAKBClLQAAAABAgShtAYBVzqhRo1JWVlb5atSoUb7xjW/kiCOOyDvvvFOr15ozZ05+/OMfp0OHDmnYsGG22GKLWj1/fTNkyJCUlZWlQYMGee211xbZPmvWrLRu3TplZWUZMGBAja4xdOjQ3HHHHct0zMJ76o033qjRNZfVgAED0rJly+V2/i//M1Ldq3PnzkmSsrKyDBkyZLnlWVYL75N///vfy3zsu+++myFDhmTSpEm1H2w5ePDBB1NWVpYHH3ywrqMAACtQo7oOAACwvIwcOTJdu3bNp59+mocffjjDhg3LQw89lBdeeCEtWrSolWtceeWV+d3vfpfLL788W2211XIt2uqTli1bZuTIkfnlL39ZZfyWW27J3Llz07hx4xqfe+jQoTnggAOy3377LfUxe++9d5544ol06NChxtctkoWf54u+/e1v54ADDsipp55aOVZeXp4keeKJJ/KNb3xjhWZcXt59992ce+656dy5s79kAQAKS2kLAKyyunXrlp49eyZJevfunfnz5+eXv/xl7rjjjhx66KFf69yffPJJmjdvnr/97W9p1qxZjjvuuNqInCT59NNP06xZs1o738rooIMOyujRo3PuueemQYP//HLYddddl/333z933nnnCsnx6aefpmnTpllzzTWz5pprrpBrrgjVfZ727dvnW9/61iLjixujqoX3SllZWV1HAQBWAZZHAADqjYXF05tvvpkkKZVKueKKK7LFFlukWbNmWW211XLAAQcs8mv5O++8c7p165aHH3442267bZo3b56BAwemrKws1157bT799NPKXycfNWpUkuSzzz7LmWeemfXWWy9NmjTJ2muvnWOPPTYfffRRlXN37tw5ffv2zW233ZYtt9wyTZs2zbnnnlv5K9FjxozJ6aefng4dOqRly5bZZ5998q9//SszZszIj370o6yxxhpZY401csQRR2TmzJlVzv3b3/42O+64Y9Zaa620aNEi3bt3z0UXXZS5c+cu9vNNnDgxO+ywQ5o3b571118/F1xwQRYsWFBl348++iinnnpq1l9//ZSXl2ettdbKXnvtlX/84x+V+8yZMyfnnXdeunbtmvLy8qy55po54ogj8t577y31z2rgwIF56623Mm7cuMqxV155JY8++mgGDhy42GOmT5+e0047rcp3ftJJJ2XWrFmV+5SVlWXWrFkZPXp05c9s5513TvKfJQPuu+++DBw4MGuuuWaaN2+e2bNnV7s8wj333JM+ffqkTZs2ad68eTbZZJMMGzascvtrr72W/v37p2PHjikvL0/79u3Tp0+fpf7V/BdffDF9+vRJixYtsuaaa+a4447LJ598Urm9T58+6dq1a0qlUpXjSqVSNtxww+y9995LdZ2v8uXlERZ+HxMmTMjRRx+ddu3apXXr1vnhD3+YWbNmZerUqTnwwAPTtm3bdOjQIaeddtoi911t3CdftDT38YMPPphevXolSY444ojKe+CLn+2pp57Kd7/73ay++upp2rRpttxyy/zpT3+qcq3q7pU//vGPKSsry/jx4xfJd+WVV6asrCzPP/985XX69++fzp07p1mzZuncuXMOPvjgyn8/AQD1m5m2AEC98c9//jNJKmcYHnPMMRk1alROOOGEXHjhhfnggw/yi1/8Ittuu22ee+65tG/fvvLYKVOm5LDDDsvgwYMzdOjQNGjQICeddFJ++ctf5oEHHsiECROSJBtssEFKpVL222+/jB8/PmeeeWZ22GGHPP/88znnnHPyxBNP5Iknnqj8tfMkeeaZZ/LSSy/lZz/7WdZbb720aNGismj86U9/mt69e2fUqFF54403ctppp+Xggw9Oo0aNsvnmm+cPf/hDnn322fz0pz9Nq1atctlll1We99VXX80hhxxSWWI+99xzOf/88/OPf/wj119/fZXvZurUqTn00ENz6qmn5pxzzsntt9+eM888Mx07dswPf/jDJMmMGTOy/fbb54033sjpp5+ebbbZJjNnzszDDz+cKVOmpGvXrlmwYEH23XffPPLIIxk8eHC23XbbvPnmmznnnHOy884756mnnlqqWcRdunTJDjvskOuvvz677757kuT6669P586d06dPn0X2/+STT7LTTjvl7bffzk9/+tP06NEjL774Yn7+85/nhRdeyP3335+ysrI88cQT+c53vpPevXvn7LPPTpK0bt26yrkGDhyYvffeOzfccENmzZpV7VIM1113XY4++ujstNNOueqqq7LWWmvllVdeyd/+9rfKffbaa6/Mnz8/F110UdZZZ538+9//zuOPP75Ieb84c+fOzV577ZVjjjkmZ5xxRh5//PGcd955efPNN3PXXXclSU488cTsu+++GT9+fHbZZZfKY+++++68+uqrVe6H5eGoo45Kv379cvPNN1feh/PmzcvLL7+cfv365Uc/+lHuv//+XHjhhenYsWNOOeWUJKm1++TLvuo+/uY3v5mRI0fmiCOOyM9+9rPKUnvh0g8PPPBA9thjj2yzzTa56qqr0qZNm9x888056KCD8sknnyyyjvKX75W+fftmrbXWysiRIxe5T0eNGpVvfvOb6dGjR5LkjTfeyMYbb5z+/ftn9dVXz5QpU3LllVemV69e+fvf/5411lhjmT8/ALAKKQEArGJGjhxZSlL6y1/+Upo7d25pxowZpbFjx5bWXHPNUqtWrUpTp04tPfHEE6UkpV//+tdVjn3rrbdKzZo1Kw0ePLhybKeddiolKY0fP36Rax1++OGlFi1aVBm75557SklKF110UZXxP/7xj6UkpauvvrpybN111y01bNiw9PLLL1fZ94EHHiglKe2zzz5Vxk866aRSktIJJ5xQZXy//fYrrb766tV+J/Pnzy/NnTu39Pvf/77UsGHD0gcffLDI5/vrX/9a5ZhNN920tPvuu1e+/8UvflFKUho3bly11/nDH/5QSlK69dZbq4xPnDixlKR0xRVXVHtsqVQqnXPOOaUkpffee680cuTIUnl5een9998vzZs3r9ShQ4fSkCFDSqVSqdSiRYvS4YcfXnncsGHDSg0aNChNnDixyvn++7//u5Sk9Oc//7ly7MvHLrTwvvnhD39Y7bbXX3+9VCqVSjNmzCi1bt26tP3225cWLFiw2M/y73//u5SkNHz48CV+5sU5/PDDS0lKv/nNb6qMn3/++aUkpUcffbRUKn3+c11//fVL++67b5X99txzz9IGG2xQbbbFSVI69thjq912zjnnVL5f+H0cf/zxVfbbb7/9SklKl1xySZXxLbbYovTNb36z8n1t3icLLe19vPAaI0eOXOS8Xbt2LW255ZaluXPnVhnv27dvqUOHDqX58+dX+fyLu1dOOeWUUrNmzUofffRR5djf//73UpLS5ZdfXu1nmjdvXmnmzJmlFi1aVPm5L/x3wQMPPFDtsQDAqsfyCADAKutb3/pWGjdunFatWqVv376pqKjI3Xffnfbt22fs2LEpKyvLYYcdlnnz5lW+Kioqsvnmmy/ypPbVVlst3/nOd5bqugtn3X55Vt73v//9tGjRYpFfne7Ro0c22mijxZ6rb9++Vd5vsskmSbLIr71vsskm+eCDD6oskfDss8/mu9/9btq1a5eGDRumcePG+eEPf5j58+fnlVdeqXJ8RUVFtt5660VyffFXte++++5stNFGVWZ0ftnYsWPTtm3b7LPPPlW+1y222CIVFRWLfK9L8v3vfz9NmjTJTTfdlD//+c+ZOnXqIt/pF6/brVu3bLHFFlWuu/vuu6esrGyZrvu9733vK/d5/PHHM3369AwaNKjaNUxXX331bLDBBrn44otzySWX5Nlnn11kuYmv8uW1lw855JAkn88ITZIGDRrkuOOOy9ixYzN58uQkn8+wvueee5aYrbYsy/35xXupNu+TL1qa+7g6//znP/OPf/yj8jv/Yq699torU6ZMycsvv1zlmMXdKwMHDsynn36aP/7xj5VjI0eOTHl5eeXPL0lmzpyZ008/PRtuuGEaNWqURo0apWXLlpk1a1ZeeumlZfrcAMCqR2kLAKyyfv/732fixIl59tln8+677+b555/PdtttlyT517/+lVKplPbt26dx48ZVXn/5y1/y73//u8q5OnTosNTXff/999OoUaNFHvRUVlaWioqKvP/++0t97tVXX73K+yZNmixx/LPPPkuSTJ48OTvssEPeeeed/OY3v8kjjzySiRMn5re//W2Szx+a9EXt2rVb5Nrl5eVV9nvvvfcqf428Ov/617/y0UcfpUmTJot8r1OnTl3ke12SFi1a5KCDDsr111+f6667LrvsskvWXXfdaq/7/PPPL3LNVq1apVQqLdN1l+ZnvXDd1SV9HwvXNt19991z0UUX5Zvf/GbWXHPNnHDCCZkxY8ZXXqNRo0aL/FwqKiqSpMo9NHDgwDRr1ixXXXVVks/XMm7WrFm1a//WpmW5Pxfem0nt3idftDT3cXX+9a9/JUlOO+20RTINGjQoSZbq3wubbbZZevXqlZEjRyZJ5s+fnxtvvDH77rtvle/lkEMOyYgRI3LUUUfl3nvvzZNPPpmJEydmzTXXXKq8AMCqzZq2AMAqa5NNNknPnj0Xu22NNdZIWVlZHnnkkSrryy705bFlmbHYrl27zJs3L++9916V4rZUKmXq1KmVD0KqybmX1h133JFZs2bltttuq1J0Lu0DsBZnzTXXzNtvv73EfdZYY420a9cu99xzz2K3t2rVapmuOXDgwFx77bV5/vnnc9NNNy3xus2aNVtkrd4vbl9aS/PzWPhz/arvY9111811112X5PMHqf3pT3/KkCFDMmfOnMqStTrz5s3L+++/X6WInDp1apKq5WSbNm1y+OGH59prr81pp52WkSNH5pBDDknbtm2/8nPUldq+T2rDwnvkzDPPTL9+/Ra7z8Ybb1zlfXX3yhFHHJFBgwblpZdeymuvvZYpU6bkiCOOqNz+8ccfZ+zYsTnnnHNyxhlnVI7Pnj07H3zwwdf9KADAKkBpCwDUS3379s0FF1yQd955JwceeGCtnrtPnz656KKLcuONN+bkk0+uHL/11lsza9asxT5Iq7YtLJO+WD6XSqVcc801NT7nnnvumZ///OeZMGFCtUtF9O3bNzfffHPmz5+fbbbZpsbXWujb3/52Bg4cmI8//jj7779/tfv17ds3Q4cOTbt27bLeeust8ZxLO/NySbbddtu0adMmV111Vfr3779URe9GG22Un/3sZ7n11lvzzDPPLNV1brrpppxwwgmV78eMGZMk2Xnnnavsd8IJJ+SKK67IAQcckI8++ijHHXfc0n+YOlDb98myWPjPxJfvgY033jhdunTJc889l6FDh36taxx88ME55ZRTMmrUqLz22mtZe+21s9tuu1VuLysrS6lUWuQvh6699trMnz//a10bAFg1KG0BgHppu+22y49+9KMcccQReeqpp7LjjjumRYsWmTJlSh599NF07949//Vf/1Wjc++6667Zfffdc/rpp2f69OnZbrvt8vzzz+ecc87JlltumR/84Ae1/GkWn6FJkyY5+OCDM3jw4Hz22We58sor8+GHH9b4nCeddFL++Mc/Zt99980ZZ5yRrbfeOp9++mkeeuih9O3bN717907//v1z0003Za+99sqJJ56YrbfeOo0bN87bb7+dBx54IPvuu+8Sy9fFWThT9auy3Xrrrdlxxx1z8sknp0ePHlmwYEEmT56c++67L6eeemplOdi9e/c8+OCDueuuu9KhQ4e0atVqkRmUX6Vly5b59a9/naOOOiq77LJLjj766LRv3z7//Oc/89xzz2XEiBF5/vnnc9xxx+X73/9+unTpkiZNmmTChAl5/vnnq8yurE6TJk3y61//OjNnzkyvXr3y+OOP57zzzsuee+6Z7bffvsq+G220UfbYY4/cfffd2X777bP55psv0+dZ0ZbHfbK0NthggzRr1iw33XRTNtlkk7Rs2TIdO3ZMx44d87vf/S577rlndt999wwYMCBrr712Pvjgg7z00kt55plncssttyzVNdq2bZv9998/o0aNykcffZTTTjstDRr8Z2W61q1bZ8cdd8zFF1+cNdZYI507d85DDz2U6667rtAzpAGAFceatgBAvfW73/0uI0aMyMMPP5z+/ftn7733zs9//vPMmjVrkYcZLYuysrLccccdOeWUUzJy5Mjstdde+dWvfpUf/OAHmTBhwmKXY6htXbt2za233poPP/ww/fr1y/HHH58tttgil112WY3P2apVqzz66KM58sgjc/XVV2fvvffO0UcfnZdffjkdO3ZMkjRs2DB33nlnfvrTn+a2227L/vvvn/322y8XXHBBmjZtmu7du9fWR6yiRYsWeeSRRzJgwIDKbAceeGAuu+yyfOMb30jnzp0r9/3Nb36TLl26pH///unVq1eOOeaYGl3zyCOPzJ///OfMnz8/Rx11VPr27Zvhw4dnnXXWSfL5+rMbbLBB5QzYfffdN3fddVd+/etf5xe/+MVXnr9x48YZO3Zsxo0bl3333TeXXXZZjj766GqLw4MOOihJCj/LNqm7+yRJmjdvnuuvvz7vv/9+dtttt/Tq1StXX311kqR379558skn07Zt25x00knZZZdd8l//9V+5//77l/gAvsU54ogjMm3atMyZM2exD9AbM2ZMevfuncGDB6dfv3556qmnMm7cuLRp06Y2PiYAsJIrK5VKpboOAQAAfD3f+9738pe//CVvvPFGGjduXNdxAAD4GiyPAAAAK6nZs2fnmWeeyZNPPpnbb789l1xyicIWAGAVYKYtAACspN54442st956ad26dQ455JCMGDEiDRs2rOtYAAB8TUpbAAAAAIAC8SAyAAAAAIACUdoCAAAAABSI0hYAAAAAoEAa1XWAIliwYEHefffdtGrVKmVlZXUdBwAAAABYBZVKpcyYMSMdO3ZMgwbVz6dV2iZ5991306lTp7qOAQAAAADUA2+99Va+8Y1vVLtdaZukVatWST7/slq3bl3HaQAAAACAVdH06dPTqVOnyj6yOkrbpHJJhNatWyttAQAAAIDl6quWaPUgMgAAAACAAlHaAgAAAAAUiNIWAAAAAKBArGkLAAAAwCpl/vz5mTt3bl3HoB5q3LhxGjZs+LXPo7QFAAAAYJVQKpUyderUfPTRR3UdhXqsbdu2qaio+MqHjS2J0hYAAACAVcLCwnattdZK8+bNv1ZpBsuqVCrlk08+ybRp05IkHTp0qPG5lLYAAAAArPTmz59fWdi2a9euruNQTzVr1ixJMm3atKy11lo1XirBg8gAAAAAWOktXMO2efPmdZyE+m7hPfh11lVW2gIAAACwyrAkAnWtNu5BpS0AAAAAQIEobQEAAAAACsSDyAAAAABYtY0dt2Kv13fXGh32+OOPZ4cddsiuu+6ae+65p5ZDsTIx0xYAAAAACuD666/P8ccfn0cffTSTJ0+usxxf5wFa1A6lLQAAAADUsVmzZuVPf/pT/uu//it9+/bNqFGjqmy/884707NnzzRt2jRrrLFG+vXrV7lt9uzZGTx4cDp16pTy8vJ06dIl1113XZJk1KhRadu2bZVz3XHHHVUeljVkyJBsscUWuf7667P++uunvLw8pVIp99xzT7bffvu0bds27dq1S9++ffPqq69WOdfbb7+d/v37Z/XVV0+LFi3Ss2fP/PWvf80bb7yRBg0a5Kmnnqqy/+WXX5511103pVKpFr61VZfSFgAAAADq2B//+MdsvPHG2XjjjXPYYYdl5MiRlcXm//7v/6Zfv37Ze++98+yzz2b8+PHp2bNn5bE//OEPc/PNN+eyyy7LSy+9lKuuuiotW7Zcpuv/85//zJ/+9KfceuutmTRpUpLPi+RTTjklEydOzPjx49OgQYPsv//+WbBgQZJk5syZ2WmnnfLuu+/mzjvvzHPPPZfBgwdnwYIF6dy5c3bZZZeMHDmyynVGjhyZAQMGVCmNWZQ1bQEAAACgjl133XU57LDDkiR77LFHZs6cmfHjx2eXXXbJ+eefn/79++fcc8+t3H/zzTdPkrzyyiv505/+lHHjxmWXXXZJkqy//vrLfP05c+bkhhtuyJprrlk59r3vfW+RjGuttVb+/ve/p1u3bhkzZkzee++9TJw4MauvvnqSZMMNN6zc/6ijjsqPf/zjXHLJJSkvL89zzz2XSZMm5bbbblvmfPWNmbYAAAAAUIdefvnlPPnkk+nfv3+SpFGjRjnooINy/fXXJ0kmTZqUPn36LPbYSZMmpWHDhtlpp52+VoZ11123SmGbJK+++moOOeSQrL/++mndunXWW2+9JKlcb3fSpEnZcsstKwvbL9tvv/3SqFGj3H777Uk+X7O3d+/e6dy589fKWh+YaQsAAAAAdei6667LvHnzsvbaa1eOlUqlNG7cOB9++GGaNWtW7bFL2pYkDRo0WGT92MU9aKxFixaLjO2zzz7p1KlTrrnmmnTs2DELFixIt27dMmfOnKW6dpMmTfKDH/wgI0eOTL9+/TJmzJgMHz58icfwOTNtAQAAAKCOzJs3L7///e/z61//OpMmTap8Pffcc1l33XVz0003pUePHhk/fvxij+/evXsWLFiQhx56aLHb11xzzcyYMSOzZs2qHFu4Zu2SvP/++3nppZfys5/9LH369Mkmm2ySDz/8sMo+PXr0yKRJk/LBBx9Ue56jjjoq999/f6644orMnTu3ygPUqJ6ZtgAAAABQR8aOHZsPP/wwRx55ZNq0aVNl2wEHHJDrrrsul156afr06ZMNNtgg/fv3z7x583L33Xdn8ODB6dy5cw4//PAMHDgwl112WTbffPO8+eabmTZtWg488MBss802ad68eX7605/m+OOPz5NPPplRo0Z9Za7VVlst7dq1y9VXX50OHTpk8uTJOeOMM6rsc/DBB2fo0KHZb7/9MmzYsHTo0CHPPvtsOnbsmG9/+9tJkk022STf+ta3cvrpp2fgwIFfOTuXz5lpCwAAAAB15Lrrrssuu+yySGGbfP4gsEmTJqV169a55ZZbcuedd2aLLbbId77znfz1r3+t3O/KK6/MAQcckEGDBqVr1645+uijK2fWrr766rnxxhvz5z//Od27d88f/vCHDBky5CtzNWjQIDfffHOefvrpdOvWLSeffHIuvvjiKvs0adIk9913X9Zaa63stdde6d69ey644II0bNiwyn5HHnlk5syZk4EDB9bgG6qfykpfXtSiHpo+fXratGmTjz/+OK1bt67rOAAAAAAso88++yyvv/561ltvvTRt2rSu4/AF559/fm6++ea88MILdR1lhVjSvbi0PaSZtgAAAABArZs5c2YmTpyYyy+/PCeccEJdx1mpKG0BAAAAgFp33HHHZfvtt89OO+1kaYRl5EFkAAAAAECtGzVq1FI99IxFmWkLAAAAAFAgdVraPvzww9lnn33SsWPHlJWV5Y477qiyvVQqZciQIenYsWOaNWuWnXfeOS+++GKVfWbPnp3jjz8+a6yxRlq0aJHvfve7efvtt1fgpwAAAAAAqD11WtrOmjUrm2++eUaMGLHY7RdddFEuueSSjBgxIhMnTkxFRUV23XXXzJgxo3Kfk046KbfffntuvvnmPProo5k5c2b69u2b+fPnr6iPAQAAAABQa+p0Tds999wze+6552K3lUqlDB8+PGeddVb69euXJBk9enTat2+fMWPG5JhjjsnHH3+c6667LjfccEN22WWXJMmNN96YTp065f7778/uu+++wj4LAAAAAEBtKOyatq+//nqmTp2a3XbbrXKsvLw8O+20Ux5//PEkydNPP525c+dW2adjx47p1q1b5T4AAAAAACuTOp1puyRTp05NkrRv377KePv27fPmm29W7tOkSZOsttpqi+yz8PjFmT17dmbPnl35fvr06bUVGwAAAADgaylsabtQWVlZlfelUmmRsS/7qn2GDRuWc889t1bysXIalyer3bZrtl6BSZbeqpR5ZcubyFyb3BfL36qUeWXLm8hcm9wXy9+qlHlly5vIXJvcF8vfqpR5ZcubyFybpmfWYsdbp8UKTrJ0vpj3zTfeTI/1Nssjzz6eHlv0WCkyf1lRMxdRYUvbioqKJJ/Ppu3QoUPl+LRp0ypn31ZUVGTOnDn58MMPq8y2nTZtWrbddttqz33mmWfmlFNOqXw/ffr0dOrUqbY/AgAAAABF8Ma4JEnrFXW9zrsu0+4DBgzI6NGjK9+vvvrq6dWrV35+0bnp1qNbkuQbnb6RV6a8mnZrtKvVqLXt008/zcYdu6SsrCz/eOeVNGvWrK4jrZQKu6bteuutl4qKiowbN65ybM6cOXnooYcqC9mtttoqjRs3rrLPlClT8re//W2JpW15eXlat25d5QUAAAAAdWWPPfbIlClTMmXKlIwfPz6NGjXKQX0PqNzesGHDtK9on0aNlu8czDlz5nyt4++89X+yabdN0nXTrrnrtjtrKVXNlEqlzJs3r04z1FSdlrYzZ87MpEmTMmnSpCSfP3xs0qRJmTx5csrKynLSSSdl6NChuf322/O3v/0tAwYMSPPmzXPIIYckSdq0aZMjjzwyp556asaPH59nn302hx12WLp3755ddtmlDj8ZAAAAACy98vLyVFRUpKKiIltssUVOP/30vP3W2/n3e+8l+Xx5hDZlLfP8pOeTJA8++GDKysoyfvz49OzZM82bN8+2226bl19+ufKcr776avbdd9+0b98+LVu2TK9evXL//fdXuW7nzp1z3nnnZcCAAWnTpk2OPvrofOc738lxxx1XZb/3338/5eXlmTBhwhI/xw3Xjc6Bh/XPgYcdlN9fN3qR7S+++GL23nvvtG7dOq1atcoOO+yQV199tXL79ddfn8022yzl5eXp0KFDZY433ngjZWVllT1iknz00UcpKyvLgw8+WOU7uffee9OzZ8+Ul5fnkUceWarvYfbs2Rk8eHA6deqU8vLydOnSJdddd11KpVI23HDD/OpXv6qy/9/+9rc0aNCgSvbaVKel7VNPPZUtt9wyW265ZZLklFNOyZZbbpmf//znSZLBgwfnpJNOyqBBg9KzZ8+88847ue+++9KqVavKc1x66aXZb7/9cuCBB2a77bZL8+bNc9ddd6Vhw4Z18pkAAAAA4OuYOXNmbrrppqy/4QZZvd2Sl0M466yz8utf/zpPPfVUGjVqlIEDB1Y5z1577ZX7778/zz77bHbffffss88+mTx5cpVzXHzxxenWrVuefvrpnH322TnqqKMyZsyYzJ49u3Kfm266KR07dkzv3r2rzfLqq6/mySeezP4H9sv+B/bLk4//Na+/9nrl9nfeeSc77rhjmjZtmgkTJuTpp5/OwIEDK2fDXnnllTn22GPzox/9KC+88ELuvPPObLjhhsv03SWfd4rDhg3LSy+9lB49eizV9/DDH/4wN998cy677LK89NJLueqqq9KyZcuUlZVl4MCBGTlyZJVrXH/99dlhhx2ywQYbLHO+pVGna9ruvPPOKZVK1W4vKyvLkCFDMmTIkGr3adq0aS6//PJcfvnlyyEhAAAAACx/Y8eOTcuWLZMks2bNSocOHXLz2FvSoMGS51yef/752WmnnZIkZ5xxRvbee+989tlnadq0aTbffPNsvvnmlfued955uf3223PnnXdWmUn7ne98J6eddlrl+06dOuX444/P//zP/+TAAw9MkowcOTIDBgxIWVlZtVmuv/767LrnrpXPntplj11z4/W/z9nnnZMk+e1vf5s2bdrk5ptvTuPGjZMkG220UZV8p556ak488cTKsV69ei3x8y/OL37xi+y663/WFW7Xrt0Sv4dXXnklf/rTnzJu3LjK395ff/31K/c/4ogj8vOf/zxPPvlktt5668ydOzc33nhjLr744mXOtrQKu6YtAAAAANQXvXv3rlxG9K9//Wt22223HLDn/pn85uQlHtejR4/KP3fo0CFJMm3atCSfl7+DBw/OpptumrZt26Zly5b5xz/+schM2549e1Z5X15ensMOOyzXX399kmTSpEl57rnnMmDAgGpzzJ8/P6NHf740wkIHHnZQ/jB6TObPn195nh122KGysP2iadOm5d13302fPn2W+HmXxpc/z1d9D5MmTUrDhg0ry+8v69ChQ/bee+/K72Ps2LH57LPP8v3vf/9rZ61Onc60BQAAAACSFi1aVFkKYKuttkqbNm0y+pqRlTNVF+eLBejCWbALFixIkvzkJz/Jvffem1/96lfZcMMN06xZsxxwwAGLPGysRYsWi5z3qKOOyhZbbJG33347119/ffr06ZN111232hz33ntv3nnnnRxx0OFVxufPn58J943PrnvulmbNmlV7/JK2JamccfzF39qfO3fuYvf98uf5qu/hq66dfP59/OAHP8ill16akSNH5qCDDkrz5s2/8riaMtMWAAAAAAqmrKwsDRo0yGefflbjczzyyCMZMGBA9t9//3Tv3j0VFRV54403lurY7t27p2fPnrnmmmsyZsyYKmvlLs51112X/v3759FJj1d5HXjofx5I1qNHjzzyyCOLLVtbtWqVzp07Z/z48Ys9/5prrpkkmTJlSuXYFx9KtiRf9T107949CxYsyEMPPVTtOfbaa6+0aNEiV155Ze6+++6v/D6+LjNtAQAAAKCOzZ49O1OnTk2SfPjhhxkxYkRmzpyZPfbZs8bn3HDDDXPbbbdln332SVlZWc4+++zKWbhL46ijjspxxx2X5s2bZ//99692v/feey933XVX7rzzzmzabbMq2w4+/NAcuPf38u/33stxxx2Xyy+/PP3798+ZZ56ZNm3a5C9/+Uu23nrrbLzxxhkyZEh+/OMfZ6211sqee+6ZGTNm5LHHHsvxxx+fZs2a5Vvf+lYuuOCCdO7cOf/+97/zs5/9rFa+h86dO+fwww/PwIEDc9lll2XzzTfPm2++mWnTplWu6duwYcMMGDAgZ555ZjbccMN8+9vfXurvsSbMtAUAAACAOnbPPfekQ4cO6dChQ7bZZptMnDgxo2+5ITvsvGONz3nppZdmtdVWy7bbbpt99tknu+++e775zW8u9fEHH3xwGjVqlEMOOSRNmzatdr/f//73adGixWLXo92x945p2apVbr7h5rRr1y4TJkzIzJkzs9NOO2WrrbbKNddcU7nEw+GHH57hw4fniiuuyGabbZa+ffvm//7v/yrPdf3112fu3Lnp2bNnTjzxxJx33nm19j1ceeWVOeCAAzJo0KB07do1Rx99dGbNmlVlnyOPPDJz5sxZ7rNsEzNtAQAAAFjVdd41STI9sxa7uXUWXdN1RRo1alRGjRq1yPgX867bed18XJpZ+X7nnXeusr5rkmyxxRZVxjp37pwJEyZU2efYY4+t8n5JyyV8+OGH+eyzz3LkkUcuMf+pp56aU089NUnyaaqul9uoUaO88f5/HnzWo0eP3HvvvdWe65hjjskxxxyz2G2bbLJJnnjiiSpjX/y8i/tOkqX7Hpo2bZpLLrkkl1xySbXZpkyZkkaNGuWHP/xhtfvUFqUtAAAAAFBp7ty5mTJlSs4444x861vfWqbZuaui2bNn56233srZZ5+dAw88MO3bt1/u17Q8AgAAAABQ6bHHHsu6666bp59+OldddVVdx6lzf/jDH7Lxxhvn448/zkUXXbRCrmmmLQAAAABQqbplBuqrAQMGZMCAASv0mkpbasW4PLnY8V2z9QpOAgAAAAArN8sjAAAAAAAUiNIWAAAAAKBAlLYAAAAAAAWitAUAAAAAKBClLQAAAABAgShtAQAAAKCe69y5c4YPH175vqysLHfccUed5anvGtV1AAAAAABYvsYlSVqvsOvtukx7DxgwIKNHj06SNGzYMB07dszee++dM4aeldVWW215BKTgzLQFAAAAgDq2xx57ZMqUKXnjjTdy7bXX5q677sqpg06u61jUEaUtAAAAANSx8vLyVFRU5Bvf+EZ22223HHTQQZlw34TK7TeOvCG9Nvlm1mraLj27bpkrrriiyvFvv/12+vfvn9VXXz0tWrRIz54989e//jVJ8uqrr2bfffdN+/bt07Jly/Tq1Sv333//Cv18LBvLIwAAAABAgbz22mu555570rjx59XdqGtGZtg55+fiEb9Ojy03z/PPPpcTjz4+LVq0yOGHH56ZM2dmp512ytprr50777wzFRUVeeaZZ7JgwYIkycyZM7PXXnvlvPPOS9OmTTN69Ojss88+efnll7POOuvU5UelGkpbAAAAAKhjY8eOTcuWLTN//vx89tlnSZKhl1yQJLn4lxfm/F8PzXf77Zsk6bxe57zx99fyu9/9LocffnjGjBmT9957LxMnTszqq6+eJNlwww0rz7355ptn8803r3x/3nnn5fbbb8+dd96Z4447bkV9RJaB0hYAAAAA6ljv3r1z5ZVX5pNPPsm1116bV155Jccc/+P8+7338vZbb+e4I4/NCUcfX7n/vHnz0qZNmyTJpEmTsuWWW1YWtl82a9asnHvuuRk7dmzefffdzJs3L59++mkmT568Qj4by05pCwAAAAB1rEWLFpWzYy+77LL07t07F5w7ND867pjPx64Zka226Vm5f6s0T8OGDZMkzZo1W+K5f/KTn+Tee+/Nr371q2y44YZp1qxZDjjggMyZM2c5fRq+LqUtAAAAABTMOeeckz333DNH/tfR6bh2x7zx2us58NCDKre3TovKP/fo0SPXXnttPvjgg8XOtn3kkUcyYMCA7L///kk+X+P2jTfeWO6fgZprUNcBAAAAAICqdt5553TdbJP8eujFOWPIT3PJsF/nyt/8Nv985f/y4gt/y8iRI3PJJZckSQ4++OBUVFRkv/32y2OPPZbXXnstt956a5544okkn69ve9ttt2XSpEl57rnncsghh1Q+pIxiUtoCAAAAQAEdd8rxGX3NqPTZfZdcfu1vc9Oom/Lt7ttkr532zKhRo7LeeuslSZo0aZL77rsva621Vvbaa6907949F1xwQeXyCZdeemlWW221bLvtttlnn32y++6755vf/GZdfjS+guURAAAAAFjF7ZokmZ5Zi936xaUG6sKoUaMWO/79Qw7M9w85cJE/J4tmXnfddfPf//3fiz1P586dM2HChCpjxx57bJX3X14uoVQqLU10lhMzbQEAAAAACsRMW5arcZOr37brOisuBwAAAACsLMy0BQAAAAAoEKUtAAAAAECBWB4BvsSSDgAAAADUJTNtAQAAAAAKRGkLAAAAAFAgSlsAAAAAgAJR2gIAAAAAFIjSFgAAAADqmc6dO2f48OG1vi+1o1FdBwAAAACA5Wlcnlyh19s1Wy/T/gMGDMjo0aOTJI0aNUqnTp3Sr1+/nHru4LRo0WJ5RMzEiROX+tzLsi+1Q2kLAAAAAHVsjz32yMiRIzN37tw88sgjOeqoo/LhrI9y6ZW/qbLf3Llz07hx40yfXf25Wpd/9fXWXHPNpc62LPtSOyyPAAAAAFBg4yZX/2LVUV5enoqKinTq1CmHHHJIDj300PzvHWMzbMj52X6Lb+eG63+fHut3y5rlq6dUKuXjjz/OCYN+lA06rZVvrNk6fXf/Tl54/rkq57zzzjvTs2fPNG3aNGussUb69etXue3LSx4MGTIk66yzTsrLy9OxY8eccMIJ1e47efLk7LvvvmnZsmVat26dAw88MP/6178qty/MfPMNf0j3zpumU5uOOaL/4ZkxY0btf3GrKDNtAQAAgHpjSUXnruusuBzwVZo1a5a5c+cmSV7752u5/U+35YZbb0rDhg2TJAfut3dWW3313HLHn9OmTZtcf+3v8t09++TpF15J6w6r53//93/Tr1+/nHXWWbnhhhsyZ86c/O///u9ir/Xf//3fufTSS3PzzTdns802y9SpU/Pcc88tdt9SqZT99tsvLVq0yEMPPZR58+Zl0KBBOeigg/Lggw9W7vf6q69n7B135Y9jb8lHH36UAQf+MBdccEHOP//82v2iVlFKWwAAAAAokCeffDJjxozJTn12TpLMmTMnV99wTdb4/8sUPDThwfz9xRfyz7empbz887UQzr/gV/nfO+/I/9z23znx2B/l/PPPT//+/XPuuedWnnfzzTdf7PUmT56cioqK7LLLLmncuHHWWWedbL314tflvf/++/P888/n9ddfT6dOnZIkN9xwQzbbbLNMnDgxG/faNEmyYMGCXDnqd2nVqlWS5KAfHJzx48crbZeS5RFgFeDXZAAAAGDlNnbs2LRs2TJNmzbNt7/97ey44465+PJfJUk6rbtOZWGbJJOenpSZM2dmvY7t0rFdy8rXm2+8ntdff/XzfSZNSp8+fZbq2t///vfz6aefZv3118/RRx+d22+/PfPmzVvsvi+99FI6depUWdgmyaabbpq2bdvmpZdeqhxbp/M6lYVtklR0qMi0adOW/gup58y0BVY4v44EQH2zMv5/X3WZi5qXFcN9weK4L6B29O7dO1deeWUaN26cjh07fv6wscxKkrRo0bzKvgsWLEhFhw4Ze9+Di5ynbZu2ST5fXmFpderUKS+//HLGjRuX+++/P4MGDcrFF1+chx56KI0bN66yb6lUSllZ2SLn+PL4l48rKyvL/PkLFvsAtaV5cFp9Y6YtAAAAANSxFi1aZMMNN8y66667SOH5ZZt/c4v8a+rUNGrYKBtssGGVV7s11kiS9OjRI+PHj1/q6zdr1izf/e53c9lll+XBBx/ME088kRdeeGGR/TbddNNMnjw5b731VuXY3//+93z88cfZZJNNlvp6LJmZtgAAAACwEum9S+9svc23c+iB+2XI+RemS5eNM3XKu7nvnj9n7+/ul5237Zlzzjknffr0yQYbbJD+/ftn3rx5ufvuuzN48OBFzjdq1KjMnz8/22yzTZo3b54bbrghzZo1y7rrrrvIvrvsskt69OiRQw89NMOHD698ENlOO+2Unj17Vs4O5utR2rIMxi1hW5sVlgIAAFYFK+OyGQAUQ1lZWW75nz/nl+ecleOOGZh/v/de2revyLbb75i11mqfJNl5551zyy235Je//GUuuOCCtG7dOjvuuONiz9e2bdtccMEFOeWUUzJ//vx07949d911V9q1a7fYa99xxx05/vjjs+OOO6ZBgwbZY489cvnlly/Xz1zfKG0BAAAAWKXtmq2TpPpZoLNbVHvsilhvddSoUdVuO3PIWTlzyFmLjLdq1SoXXXJZLrrksmqP7devX/r167fYbW+88Ubln/fbb7/st99+1Z7ni/smyTrrrJP/+Z//WabMg046NoP+a9FZviye0hYAAACAWuUBdfD1KG0BAABYJVmCAoCVVYO6DgAAAAAAwH+YaQuwivLrSMCqysw5AABWdWbaAgAAAAAUiJm2AFBDZvsBAACwPChtAZaCcg4AAABYUZS2AAD1nDWwAQCgWJS2AAC1yMx8AADg61LaAgAAKz1/YQIArEqUtgBAYSlhAACoDf/578oWK+R6y/rfqgMGDMjo0aMXGX/m/57LBhtukMcefjSXXfybTHr62UydMjU33f6H9N2z/xLPOX/+/Fx00UUZPXp03nzzzTRr1iwbbbRRjjnmmBxxxBHLFpAVTmkLAPWItUsBAKCY9thjj4wcObLKWPmazZMkn8z6JN0275ZDjzgsP/jeoUt1viFDhuTqq6/OiBEj0rNnz0yfPj1PPfVUPvzww1rPvtCcOXOSJsvt9PWK0haAQjCjEgDAfxNBfVZeXp6KiooqY9MzK0my6567Zdc9d1um8911110ZNGhQvv/971eObb755lX2WbBgQS6++OJcc801eeutt9K+ffscc8wxOeuss5IkL7zwQk488cQ88cQTad68eb73ve/lkksuScuWLZN8PkP4o48+yjbbbJPLL788TZo0yfNvvJh333k3Pz3ljEy4b0IaNGiQb2//7Vzwm4uybodNl/l7qa8a1HUAAAAAAKB2VVRUZMKECXnvvfeq3efMM8/MhRdemLPPPjt///vfM2bMmLRv3z5J8sknn2SPPfbIaqutlokTJ+aWW27J/fffn+OOO67KOcaPH5+XXnop48aNy9ixY/PJJ5+kb++90qJly9z98D2599H70qJli3xvj/0+n4nLUjHTFgAAAADq2NixYytnsCbJnnvumetuGVXj811yySU54IADUlFRkc022yzbbrtt9t133+y5555JkhkzZuQ3v/lNRowYkcMPPzxJssEGG2T77bdPktx000359NNP8/vf/z4tWny+FvCIESOyzz775MILL6wsd1u0aJFrr702TZp8vi7Cb6+/Mg0alGXEtb9NWVlZkuSKkVdlnbZr55GHHkyfXZdtxnB9pbQFAAAAgDrWu3fvXHnllZXvFxalNbXpppvmb3/7W55++uk8+uijefjhh7PPPvtkwIABufbaa/PSSy9l9uzZ6dOnz2KPf+mll7L55ptXybHddttlwYIFefnllytL2+7du1cWtkky6eln89o/X8varaou9fDZZ5/l9ddf/VqfqT5R2rKKG1fNeJsVmgIAAABgSVq0aJENN9ywytjCNW1rqkGDBunVq1d69eqVk08+OTfeeGN+8IMf5KyzzkqzZs2WeGypVKqcKftlXxz/crm8YMGCbLHVlrnmpusWOW6N1uvW4FPUT9a0BQAAAIB6YNNNP38Q2KxZs9KlS5c0a9Ys48ePr3bfSZMmZdas/xTHjz32WBo0aJCNNtqo2mts/s0t8ur/vZo111ozG2y4QZVXmzYm0S0tpS0AAAAAFNjMmTPz/KTn8/yk55Mkb77+Zp5/blLemjy52mMOOOCAXHrppfnrX/+aN998Mw8++GCOPfbYbLTRRuna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ALCsCl3adujQIZtuummVsU022SSTJ09OklRUVCTJIrNqp02btsjs2y8qLy9P69atq7wAAAAAAIqg0KXtdtttl5dffrnK2CuvvJJ11103SbLeeuuloqIi48aNq9w+Z86cPPTQQ9l2221XaFYAAAAAgNrQqK4DLMnJJ5+cbbfdNkOHDs2BBx6YJ598MldffXWuvvrqJJ8vi3DSSSdl6NCh6dKlS7p06ZKhQ4emefPmOeSQQ+o4PQAAAADAsit0adurV6/cfvvtOfPMM/OLX/wi6623XoYPH55DDz20cp/Bgwfn008/zaBBg/Lhhx9mm222yX333ZdWrVrVYXIAAAAAgJopdGmbJH379k3fvn2r3V5WVpYhQ4ZkyJAhKy4UAAAAAMByUug1bQEAAAAA6hulLQAAAABAgShtAQAAAAAKRGkLAAAAAFAgSlsAAAAAgAJR2gIAAAAAFIjSFgAAAACgQJS2AAAAAAAFUuPS9tVXX83PfvazHHzwwZk2bVqS5J577smLL75Ya+EAAAAAAOqbGpW2Dz30ULp3756//vWvue222zJz5swkyfPPP59zzjmnVgMCAAAAANQnNSptzzjjjJx33nkZN25cmjRpUjneu3fvPPHEE7UWDgAAAACgvqlRafvCCy9k//33X2R8zTXXzPvvv/+1QwEAAAAA1Fc1Km3btm2bKVOmLDL+7LPPZu211/7aoQAAAAAA6qsalbaHHHJITj/99EydOjVlZWVZsGBBHnvssZx22mn54Q9/WNsZAQAAAADqjRqVtueff37WWWedrL322pk5c2Y23XTT7Ljjjtl2223zs5/9rLYzAgAAAADUG41qclDjxo1z00035Re/+EWeffbZLFiwIFtuuWW6dOlS2/kAAAAAAOqVGpW2C22wwQbZYIMNaisLAAAAAEC9V6PS9pRTTlnseFlZWZo2bZoNN9ww++67b1ZfffWvFQ4AAAAAoL6pUWn77LPP5plnnsn8+fOz8cYbp1Qq5f/+7//SsGHDdO3aNVdccUVOPfXUPProo9l0001rOzMAAAAAwCqrRg8i23fffbPLLrvk3XffzdNPP51nnnkm77zzTnbdddccfPDBeeedd7Ljjjvm5JNPru28AAAAAACrtBqVthdffHF++ctfpnXr1pVjrVu3zpAhQ3LRRRelefPm+fnPf56nn3661oICAAAAANQHNSptP/7440ybNm2R8ffeey/Tp09PkrRt2zZz5sz5eukAAAAAAOqZGi+PMHDgwNx+++15++2388477+T222/PkUcemf322y9J8uSTT2ajjTaqzawAAAAAAKu8Gj2I7He/+11OPvnk9O/fP/Pmzfv8RI0a5fDDD8+ll16aJOnatWuuvfba2ksKAAAAAFAP1Ki0bdmyZa655ppceumlee2111IqlbLBBhukZcuWlftsscUWtZURAAAAAKDeqFFpu1DLli3To0eP2soCAAAAAFDv1bi0nThxYm655ZZMnjx5kQeO3XbbbV87GAAAAABAfVSjB5HdfPPN2W677fL3v/89t99+e+bOnZu///3vmTBhQtq0aVPbGQEAAAAA6o0albZDhw7NpZdemrFjx6ZJkyb5zW9+k5deeikHHnhg1llnndrOCAAAAABQb9SotH311Vez9957J0nKy8sza9aslJWV5eSTT87VV19dqwEBAAAAAOqTGpW2q6++embMmJEkWXvttfO3v/0tSfLRRx/lk08+qb10AAAAAAD1TI0eRLbDDjtk3Lhx6d69ew488MCceOKJmTBhQsaNG5c+ffrUdkYAAAAAgHqjRqXtiBEj8tlnnyVJzjzzzDRu3DiPPvpo+vXrl7PPPrtWAwIAAAAA1Cc1Km1XX331yj83aNAggwcPzuDBg2stFAAAAABAfVWjNW0bNmyYadOmLTL+/vvvp2HDhl87FAAAAABAfVWj0rZUKi12fPbs2WnSpMnXCgQAAAAAUJ8t0/IIl112WZKkrKws1157bVq2bFm5bf78+Xn44YfTtWvX2k0IAAAAAFCPLFNpe+mllyb5fKbtVVddVWUphCZNmqRz58656qqrajchAAAAAEA9skyl7euvv54k6d27d2677basttpqyyUUAAAAAEB9tUyl7UIPPPBAbecAAAAAACA1LG3nz5+fUaNGZfz48Zk2bVoWLFhQZfuECRNqJRwAAAAAQH1To9L2xBNPzKhRo7L33nunW7duKSsrq+1cAAAAAAD1Uo1K25tvvjl/+tOfstdee9V2HgAAAACAeq1BTQ5q0qRJNtxww9rOAgAAAABQ79WotD311FPzm9/8JqVSqbbzAAAAAADUazVaHuHRRx/NAw88kLvvvjubbbZZGjduXGX7bbfdVivhAAAAAADqmxqVtm3bts3+++9f21kAAAAAAOq9GpW2I0eOrO0cAAAAAACkhmvaJsm8efNy//3353e/+11mzJiRJHn33Xczc+bMWgsHAAAAAFDf1Gim7Ztvvpk99tgjkydPzuzZs7PrrrumVatWueiii/LZZ5/lqquuqu2cAAAAAAD1Qo1m2p544onp2bNnPvzwwzRr1qxyfP/998/48eNrLRwAAAAAQH1To5m2jz76aB577LE0adKkyvi6666bd955p1aCAQAAAADURzWaabtgwYLMnz9/kfG33347rVq1+tqhAAAAAADqqxqVtrvuumuGDx9e+b6srCwzZ87MOeeck7322qu2sgEAAAAA1Ds1Wh7h0ksvTe/evbPpppvms88+yyGHHJL/+7//yxprrJE//OEPtZ0RAAAAAKDeqFFp27Fjx0yaNCk333xznn766SxYsCBHHnlkDj300CoPJgMAAAAAYNnUqLRNkmbNmuWII47IEUccUZt5AAAAAADqtRqtaTts2LBcf/31i4xff/31ufDCC792KAAAAACA+qpGpe3vfve7dO3adZHxzTbbLFddddXXDgUAAAAAUF/VqLSdOnVqOnTosMj4mmuumSlTpnztUAAAAAAA9VWNSttOnTrlscceW2T8scceS8eOHb92KAAAAACA+qpGDyI76qijctJJJ2Xu3Ln5zne+kyQZP358Bg8enFNPPbVWAwIAAAAA1Cc1Km0HDx6cDz74IIMGDcqcOXOSJE2bNs3pp5+eM888s1YDAgAAAADUJ8tc2s6fPz+PPvpoTj/99Jx99tl56aWX0qxZs3Tp0iXl5eXLIyMAAAAAQL2xzKVtw4YNs/vuu+ell17Keuutl169ei2PXAAAAAAA9VKNHkTWvXv3vPbaa7WdBQAAAACg3qtRaXv++efntNNOy9ixYzNlypRMnz69ygsAAAAAgJqp0YPI9thjjyTJd7/73ZSVlVWOl0qllJWVZf78+bWTDgAAAACgnqlRafvAAw/Udg4AAAAAAFLD0nannXaq7RwAAAAAAKSGa9omySOPPJLDDjss2267bd55550kyQ033JBHH3201sIBAAAAANQ3NSptb7311uy+++5p1qxZnnnmmcyePTtJMmPGjAwdOrRWAwIAAAAA1Cc1Km3PO++8XHXVVbnmmmvSuHHjyvFtt902zzzzTK2FAwAAAACob2pU2r788svZcccdFxlv3bp1Pvroo6+bCQAA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",
+      "text/plain": [
+       "<Figure size 1400x800 with 1 Axes>"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    }
+   ],
+   "source": [
+    "import numpy as np\n",
+    "import matplotlib.pyplot as plt\n",
+    "\n",
+    "# Define the number of time intervals\n",
+    "\n",
+    "# Define the time intervals (e.g., hours)\n",
+    "time_intervals = range(count)\n",
+    "bar_width = 0.15\n",
+    "index = np.arange(len(time_intervals))\n",
+    "\n",
+    "# Create the plot\n",
+    "fig, ax = plt.subplots(figsize=(14, 8))\n",
+    "\n",
+    "# Define pastel rainbow colors\n",
+    "colors = ['#FFB3BA', '#FFDFBA', '#FFFFBA', '#BAFFC9', '#BAE1FF']\n",
+    "\n",
+    "# Plot each set of values\n",
+    "bar1 = plt.bar(index, accuracy_values, bar_width, label='Accuracy', color=colors[0])\n",
+    "bar2 = plt.bar(index + bar_width, binary_accuracy_values, bar_width, label='Binary Accuracy', color=colors[1])\n",
+    "bar3 = plt.bar(index + 2 * bar_width, recall_values, bar_width, label='Recall', color=colors[2])\n",
+    "bar4 = plt.bar(index + 3 * bar_width, precision_values, bar_width, label='Precision', color=colors[3])\n",
+    "bar5 = plt.bar(index + 4 * bar_width, f1_values, bar_width, label='F1 Score', color=colors[4])\n",
+    "\n",
+    "# Set labels, title, and legend\n",
+    "plt.xlabel('Time Interval')\n",
+    "plt.ylabel('Percentage')\n",
+    "plt.title('Performance Metrics by Time Interval')\n",
+    "plt.xticks(index + 2 * bar_width, time_intervals)\n",
+    "plt.legend()\n",
+    "\n",
+    "# Adjust layout and show plot\n",
+    "plt.tight_layout()\n",
+    "plt.show()\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "e6c8749c",
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "e09152a7",
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.11.5"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
